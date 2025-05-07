@@ -1,0 +1,60 @@
+SISFALL dataset
+I used the accelerometer data from ADXL345 sampled at 200HZ.
+
+I consider the data from fall trials by elderly people.
+
+Raw accelerometer readings are in sensor bits -> translate this using the resolution and range
+
+We are only interested in the magnitude of the total acceleration so we can use the sqrt(x^2+y^2+z^2)
+
+I then remove 1 g due to gravity. (1g = 9.81ms^-2)
+
+Strictly just looking at this data I looked at the peaks. (the peak data is the exact acceleration at impact)
+
+Falls (75 falls)
+median = 2.95, 25th percentile = 1.9
+
+NonFalls(893 trials)
+median = 0.62 75th percentile = 1.15
+
+Fall peaks (g):
+count    75.000000
+mean      3.156145
+std       1.658264
+min       0.705064
+25%       1.902128
+50%       2.947381
+75%       4.128152
+max       8.146177
+
+ADL peaks (g) (non falls):
+count    893.000000
+mean       0.940364
+std        0.979626
+min        0.079135
+25%        0.316730
+50%        0.616215
+75%        1.154388
+max        8.894206
+
+
+So from this we can see between 1.2 ~ 1.9 g is when ADL end and where most falls Stops
+
+some overlap occurs here which may be problamatic for false positive
+
+
+Possible ways to improve this
+
+Add gyroscope (anuglar velocity) 
+
+Check inactivity -> see if acceleration is low for 1s after a high acceleration (could be sitting down?)
+
+Free fall detection = check for acceleration dipping below a treshold.
+                                                                    
+So we check for a free fall time period -> Impact spike
+
+During the free fall time, there is no no acceleration (something close to 0)
+Then on impact the reading will spike as the object will decelerate from its fall speed to zero
+Hence a spike will be seen
+
+Looking at the image fall_over_time.png we can see a clear three phase pattern
