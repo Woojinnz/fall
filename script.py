@@ -57,6 +57,18 @@ def update_buffer(new_point):
 def get_buffer_as_dataframe():
     return pd.DataFrame(buffer)
 
+def get_files_as_dataframes(pattern):
+    output_list = []
+    for subj_dir in DATA_DIR.iterdir():
+        if not subj_dir.is_dir(): continue
+        for f in subj_dir.glob("*.txt"):
+            if pattern.match(f.name):
+                df = load_sisfall_file(f)
+                df = downsample_to_1hz(df)
+                df['file'] = f.name
+                output_list.append(df)
+    return pd.concat(output_list, ignore_index=True)
+
 
 def load_sisfall_file(path: Path) -> pd.DataFrame:
     raw = path.read_text().replace(';','\n')
@@ -69,7 +81,6 @@ def load_sisfall_file(path: Path) -> pd.DataFrame:
 
 
 def downsample_to_1hz(df, original_freq=200):
-    # Group every `original_freq` rows (since 200Hz → 1Hz = 200:1 downsampling)
     downsampled = (
         df.groupby(df.index // original_freq)
         .mean(numeric_only=True)  # Only average numeric columns
@@ -78,25 +89,28 @@ def downsample_to_1hz(df, original_freq=200):
 
 
 def extract_features(group):
+    # Find the index of the maximum 'dyn_a' value (peak)
+    peak_idx = group['dyn_a'].idxmax()
+
+    # Select all rows after the peak
+    post_peak_data = group.loc[peak_idx + 1:, 'dyn_a']
+    pre_peak_data = group.loc[:peak_idx - 1, 'dyn_a']
+
     features = {
         # Basic statistics
         'max_dyn_a': group['dyn_a'].max(),
-        'mean_dyn_a': group['dyn_a'].mean(),
-        'std_dyn_a': group['dyn_a'].std(),
-        'min_dyn_a': group['dyn_a'].min(),
-
-        # Impact-related features
-        'impact_ratio': (group['dyn_a'] > 0.15).mean(),  # percentage of samples above threshold
-
-        # Post-impact behavior
-        'post_impact_var': group['dyn_a'].tail(7).var()  # variance in last 30 samples
+        # difference in mean and variance before and after the peak
+        'pre_impact_var': pre_peak_data.var() if not pre_peak_data.empty else 0,
+        'pre_impact_mean': pre_peak_data.mean() if not pre_peak_data.empty else 0,
+        'post_impact_var': post_peak_data.var() if not post_peak_data.empty else 0,
+        'post_impact_mean': post_peak_data.mean() if not post_peak_data.empty else 0,
     }
     return pd.Series(features)
 
 
 def classify_buffer(buffer_df, model, scaler):
     """
-    Classify whether the buffer contains a fall or ADL
+    Classify whether the buffer contains a fall or ADL based on features computed after the peak.
 
     Args:
         buffer_df: DataFrame from get_buffer_as_dataframe()
@@ -107,14 +121,20 @@ def classify_buffer(buffer_df, model, scaler):
         prediction: 1 for fall, 0 for ADL
         probability: confidence score [0-1]
     """
-    # Calculate the required metrics from the buffer
+    # Find the index of the peak 'dyn_a' value
+    peak_idx = buffer_df['dyn_a'].idxmax()
+
+    # Extract all data after the peak (exclude peak if desired)
+    post_peak_data = buffer_df.loc[peak_idx + 1:, 'dyn_a']
+    pre_peak_data = buffer_df.loc[:peak_idx - 1, 'dyn_a']
+
+    # Compute features
     features = {
         'max_dyn_a': buffer_df['dyn_a'].max(),
-        'mean_dyn_a': buffer_df['dyn_a'].mean(),
-        'std_dyn_a': buffer_df['dyn_a'].std(),
-        'min_dyn_a': buffer_df['dyn_a'].min(),
-        'impact_ratio': (buffer_df['dyn_a'] > 0.15).mean(),
-        'post_impact_var': buffer_df['dyn_a'].tail(7).var()
+        'post_impact_var': post_peak_data.var() if not post_peak_data.empty else 0,
+        'post_impact_mean': post_peak_data.mean() if not post_peak_data.empty else 0,
+        'pre_impact_var': pre_peak_data.var() if not pre_peak_data.empty else 0,
+        'pre_impact_mean': pre_peak_data.mean() if not pre_peak_data.empty else 0,
     }
 
     # Convert to DataFrame and scale
@@ -126,31 +146,16 @@ def classify_buffer(buffer_df, model, scaler):
     probability = model.predict_proba(features_scaled)[0][1]  # probability of being a fall
 
     return prediction, probability
+# Elderly only regex
+# pat_fall = re.compile(r'^F\d{2}_(SE\d{2})_R\d{2}\.txt$')
+# pat_adl  = re.compile(r'^D\d{2}_(SE\d{2})_R\d{2}\.txt$')
+# All regex
+pat_fall = re.compile(r'^F\d{2}_(S[A-Z]\d{2})_R\d{2}\.txt$')
+pat_adl  = re.compile(r'^D\d{2}_(S[A-Z]\d{2})_R\d{2}\.txt$')
 
-pat_fall = re.compile(r'^F\d{2}_(SE\d{2})_R\d{2}\.txt$')
-pat_adl  = re.compile(r'^D\d{2}_(SE\d{2})_R\d{2}\.txt$')
+falls = get_files_as_dataframes(pat_fall)
 
-dfs_fall = []
-for subj_dir in DATA_DIR.iterdir():
-    if not subj_dir.is_dir(): continue
-    for f in subj_dir.glob("*.txt"):
-        if pat_fall.match(f.name):
-            df = load_sisfall_file(f)
-            df = downsample_to_1hz(df)
-            df['file'] = f.name
-            dfs_fall.append(df)
-falls = pd.concat(dfs_fall, ignore_index=True)
-
-dfs_adl = []
-for subj_dir in DATA_DIR.iterdir():
-    if not subj_dir.is_dir(): continue
-    for f in subj_dir.glob("*.txt"):
-        if pat_adl.match(f.name):
-            df = load_sisfall_file(f)
-            df = downsample_to_1hz(df)
-            df['file'] = f.name
-            dfs_adl.append(df)
-adls = pd.concat(dfs_adl, ignore_index=True)
+adls = get_files_as_dataframes(pat_adl)
 
 range_g, res_bits = 16.0, 13
 scale = (2*range_g)/(2**res_bits)
@@ -206,7 +211,7 @@ X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
 # Train model
-model = XGBClassifier(scale_pos_weight=10,  # 10x weight for positive class
+model = XGBClassifier(scale_pos_weight=1.5,
                    eval_metric='aucpr')
 model.fit(X_train_scaled, y_train)
 
