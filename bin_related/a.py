@@ -1,9 +1,11 @@
-import struct
-import pandas as pd
+import struct, pandas as pd, pathlib
+
 
 PACKET_SIZE = 40
 FMT_HEADER  = "<I4sI4s"
 FMT_PAYLOAD = "<ddd"
+
+CSV_FILE   = pathlib.Path("mock_positions.csv")
 
 ts, xs, ys, zs, pids = [], [], [], [], []
 with open("data.bin","rb") as f:
@@ -16,13 +18,15 @@ with open("data.bin","rb") as f:
 
 df = pd.DataFrame({
     "t": ts,
-    "ax": xs,
-    "ay": ys,
-    "az": zs,
+    "x": xs,
+    "y": ys,
+    "z": zs,
     "pid": pids
 })
 
-print(df)
+
+df.to_csv(CSV_FILE, index=False)
+print(f"Saved {len(df)} rows → {CSV_FILE}")
 
 # df["dt_ms"] = df["t"].diff().fillna(0)
 

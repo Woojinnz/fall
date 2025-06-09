@@ -14,6 +14,13 @@ from threading import Lock
 
 from convert_acceleration import pos_to_accel
 
+REDIS_ACCEL_DB = 2
+ACCEL_KEY      = "accel:stream"
+ACCEL_BUF_LEN  = 60      
+
+redis_accel = redis.Redis(host="localhost", port=6379, db=REDIS_ACCEL_DB)
+redis_accel.flushdb()
+
 app = Flask(__name__)
 
 redis_client = redis.Redis(host='localhost', port=6379, db=0)
@@ -42,6 +49,11 @@ buffer = []
 
 # Add a lock for thread-safe access to active_tags
 active_tags_lock = Lock()
+
+def push_accel_sample(sample: dict):
+    redis_accel.rpush(ACCEL_KEY, json.dumps(sample))
+    redis_accel.ltrim(ACCEL_KEY, -ACCEL_BUF_LEN, -1)
+
 
 def set_anchor(anchor_id, x, y, z=2.45):
     anchorArray[anchor_id].x = x
@@ -129,14 +141,27 @@ def process_tag_data(tag_data, anchorArray):
         with active_tags_lock:
             if tag_id not in active_tags:
                 current_tag = TagPositioning(tag_id)
-                latest_position = current_tag.positioning_service(tag_data, anchorArray)
+                current_tag.positioning_service(tag_data, anchorArray)
                 active_tags[tag_id] = current_tag
             else:
                 current_tag = active_tags[tag_id]
-                latest_position = current_tag.positioning_service(tag_data, anchorArray)
+                current_tag.positioning_service(tag_data, anchorArray)
 
-        redis_queue.put((tag_id, current_tag.current_location))
-        print(f"Latest position for {tag_id}: {current_tag.current_location}")
+        pos = current_tag.current_location      
+
+        ts = time.time()
+        acc = pos_to_accel(tag_id, ts, pos["x"], pos["y"], pos["z"])
+        if acc is not None:                     
+            acc_sample = {
+                "tag_id": tag_id,
+                "ts":     ts,
+                **acc   
+            }
+            push_accel_sample(acc_sample)
+
+        redis_queue.put((tag_id, pos))
+        print(f"Latest position for {tag_id}: {pos}")
+
     except Exception as e:
         print(f"Error processing tag data: {e}")
 
