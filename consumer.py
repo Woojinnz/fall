@@ -14,6 +14,7 @@ def classify_buffer(buffer_df: pd.DataFrame, model, scaler):
         'post_imp_var'   : post.var()  if not post.empty else 0,
     }
 
+    
     X = scaler.transform(pd.DataFrame([feat]))
     pred = model.predict(X)[0]
     prob = model.predict_proba(X)[0][1]

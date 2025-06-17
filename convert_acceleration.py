@@ -23,7 +23,7 @@ def pos_to_accel(tag_id: int, timestamp: float, x: float, y: float, z: float):
 
     ax_g, ay_g, az_g = a / G           
     res_a = np.linalg.norm([ax_g, ay_g, az_g])
-    dyn_a = abs(res_a - 1.0) 
+    dyn_a = res_a
 
     return {
         "AccX_g": ax_g,
